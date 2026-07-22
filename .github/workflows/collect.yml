@@ -25,7 +25,7 @@ jobs:
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       HF_DATASET_REPO: Houroux/polymarket-l2-history
-      DATA_DIR: ${{ runner.temp }}/polymarket-data
+      DATA_DIR: /tmp/polymarket-data
       MAX_MARKETS: "40"
       ROTATION_SECONDS: "900"
       MAX_FILE_MIB: "64"
