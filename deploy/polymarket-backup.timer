@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly Polymarket data archive
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

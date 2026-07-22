@@ -1,0 +1,83 @@
+name: Collect Polymarket L2 data
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "status/**"
+  workflow_dispatch:
+  schedule:
+    # Away from the start of the hour, when scheduled Actions are busiest.
+    - cron: "23 */5 * * *"
+
+concurrency:
+  group: polymarket-l2-collector
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_DATASET_REPO: Houroux/polymarket-l2-history
+      DATA_DIR: ${{ runner.temp }}/polymarket-data
+      MAX_MARKETS: "40"
+      ROTATION_SECONDS: "900"
+      MAX_FILE_MIB: "64"
+      BACKUP_INTERVAL_SECONDS: "900"
+      BACKUP_MIN_AGE_SECONDS: "120"
+      REQUIRE_REMOTE_BACKUP: "true"
+      HEALTH_HOST: "127.0.0.1"
+      PORT: "8080"
+
+    steps:
+      - name: Check out the collector
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the collector
+        run: python -m pip install -e .
+
+      - name: Check required secret
+        shell: bash
+        run: |
+          if [[ -z "$HF_TOKEN" ]]; then
+            echo "The HF_TOKEN repository secret is missing." >&2
+            exit 1
+          fi
+
+      - name: Collect and back up data
+        shell: bash
+        run: bash scripts/run_github_collector.sh
+
+      # GitHub disables schedules in public repositories with no activity for
+      # 60 days. This weekly operational heartbeat is genuine repository
+      # activity and also records that the collector completed successfully.
+      - name: Record weekly successful operation
+        if: success()
+        shell: bash
+        run: |
+          if [[ "$(date -u +%u)" != "7" ]]; then
+            exit 0
+          fi
+          mkdir -p status
+          date -u +%Y-%m-%d > status/last-successful-week.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add status/last-successful-week.txt
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "chore: record weekly collector heartbeat"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

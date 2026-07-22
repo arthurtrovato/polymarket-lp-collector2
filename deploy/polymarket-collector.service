@@ -1,0 +1,33 @@
+[Unit]
+Description=Polymarket LP public market-data collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=polymarket
+Group=polymarket
+WorkingDirectory=/opt/polymarket-collector
+EnvironmentFile=-/etc/polymarket-collector.env
+ExecStart=/opt/polymarket-collector/.venv/bin/polymarket-collector
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+# Keep the small VPS usable even if a malformed feed causes a memory spike.
+MemoryMax=700M
+TasksMax=64
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/polymarket-collector
+
+[Install]
+WantedBy=multi-user.target
+

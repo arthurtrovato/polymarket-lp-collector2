@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polymarket-lp-collector"
+version = "0.1.0"
+description = "Low-resource Polymarket LP market-data collector"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "huggingface-hub>=1.0,<2",
+  "websockets>=15,<17",
+]
+
+[project.scripts]
+polymarket-collector = "polymarket_collector.main:cli"
+
+[tool.setuptools.packages.find]
+include = ["polymarket_collector*"]

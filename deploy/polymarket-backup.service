@@ -1,0 +1,12 @@
+[Unit]
+Description=Archive Polymarket collector files with rclone
+After=network-online.target polymarket-collector.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/polymarket-collector.env
+ExecStart=/usr/local/sbin/polymarket-backup
+Nice=10
+IOSchedulingClass=idle
+

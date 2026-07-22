@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENV_FILE="${ENV_FILE:-/etc/polymarket-collector.env}"
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
+DATA_DIR="${DATA_DIR:-/var/lib/polymarket-collector}"
+RCLONE_REMOTE="${RCLONE_REMOTE:-}"
+LOCAL_RETENTION_DAYS="${LOCAL_RETENTION_DAYS:-0}"
+REMOVE_AFTER_UPLOAD="${REMOVE_AFTER_UPLOAD:-false}"
+BACKUP_MIN_AGE="${BACKUP_MIN_AGE:-2m}"
+
+if [[ -z "$RCLONE_REMOTE" ]]; then
+  echo "RCLONE_REMOTE is empty; backup is not configured."
+  exit 0
+fi
+if [[ ! -d "$DATA_DIR" ]]; then
+  echo "Data directory does not exist: $DATA_DIR" >&2
+  exit 1
+fi
+if ! [[ "$LOCAL_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
+    echo "LOCAL_RETENTION_DAYS must be a non-negative integer." >&2
+    exit 1
+fi
+
+case "${REMOVE_AFTER_UPLOAD,,}" in
+  1|true|yes) RCLONE_ACTION="move" ;;
+  0|false|no) RCLONE_ACTION="copy" ;;
+  *)
+    echo "REMOVE_AFTER_UPLOAD must be true or false." >&2
+    exit 1
+    ;;
+esac
+
+LOCK_FILE="${BACKUP_LOCK_FILE:-/tmp/polymarket-backup.lock}"
+exec 9>"$LOCK_FILE"
+flock -n 9 || exit 0
+
+rclone "$RCLONE_ACTION" "$DATA_DIR" "$RCLONE_REMOTE" \
+  --include "*.jsonl.gz" \
+  --min-age "$BACKUP_MIN_AGE" \
+  --checksum \
+  --transfers 2 \
+  --checkers 4 \
+  --retries 3 \
+  --low-level-retries 10 \
+  --create-empty-src-dirs
+
+if (( LOCAL_RETENTION_DAYS > 0 )); then
+  find "$DATA_DIR" -type f -name "*.jsonl.gz" \
+    -mtime "+$LOCAL_RETENTION_DAYS" -delete
+fi
