@@ -33,14 +33,17 @@ fi
 
 stop_children() {
   trap - EXIT INT TERM
+  # Stop and reap the periodic uploader before the collector finalizes its
+  # active files. This prevents it from racing the one-shot final backup.
+  if [[ -n "$backup_pid" ]]; then
+    kill -TERM "$backup_pid" 2>/dev/null || true
+    wait "$backup_pid" 2>/dev/null || true
+    backup_pid=""
+  fi
   if [[ -n "$collector_pid" ]]; then
     kill -TERM "$collector_pid" 2>/dev/null || true
   fi
-  if [[ -n "$backup_pid" ]]; then
-    kill -TERM "$backup_pid" 2>/dev/null || true
-  fi
   wait "$collector_pid" 2>/dev/null || true
-  wait "$backup_pid" 2>/dev/null || true
 }
 trap stop_children EXIT INT TERM
 
