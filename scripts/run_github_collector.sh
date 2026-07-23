@@ -28,9 +28,20 @@ if [[ "$collector_status" -ne 0 && "$collector_status" -ne 124 ]]; then
   exit "$collector_status"
 fi
 
-# The TERM handler has finalized the active .part files. Upload them now rather
-# than leaving the final rotation behind on the ephemeral runner disk.
-BACKUP_MIN_AGE_SECONDS=0 python -m polymarket_collector.hf_backup
+# The TERM handler has finalized the active .part files. Retry the one-shot
+# backup because the runner has enough shutdown margin and local files would be
+# lost when it exits.
+for attempt in $(seq 1 10); do
+  if BACKUP_MIN_AGE_SECONDS=0 python -m polymarket_collector.hf_backup; then
+    if ! find "$DATA_DIR" -type f \
+      \( -name '*.jsonl.gz' -o -name '*.jsonl.part' \) \
+      -print -quit | grep -q .; then
+      break
+    fi
+  fi
+  echo "Final backup attempt $attempt left local archives; retrying." >&2
+  sleep 15
+done
 
 if find "$DATA_DIR" -type f \( -name '*.jsonl.gz' -o -name '*.jsonl.part' \) \
   -print -quit | grep -q .; then

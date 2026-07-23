@@ -23,15 +23,14 @@ RTDS_SUBSCRIPTION = {
         {
             "topic": "crypto_prices",
             "type": "update",
-            "filters": "btcusdt,ethusdt,solusdt,xrpusdt",
         },
         {
             "topic": "crypto_prices_chainlink",
             "type": "*",
-            "filters": "",
         },
     ],
 }
+RTDS_STALE_AFTER_SECONDS = 30.0
 
 
 async def _write_control(
@@ -196,10 +195,20 @@ async def run_rtds_crypto_stream(
     writer: RotatingJsonlWriter,
     state: CollectorState,
     stop_event: asyncio.Event,
+    *,
+    stale_after_seconds: float = RTDS_STALE_AFTER_SECONDS,
 ) -> None:
     async def connected(websocket: Any, connection_id: str) -> None:
         await websocket.send(json.dumps(RTDS_SUBSCRIPTION, separators=(",", ":")))
+        await _write_control(
+            writer,
+            "rtds",
+            "subscribed",
+            connection_id,
+            subscriptions=RTDS_SUBSCRIPTION["subscriptions"],
+        )
         last_ping = 0.0
+        last_data = time.monotonic()
         while not stop_event.is_set():
             now = time.monotonic()
             if now - last_ping >= 5:
@@ -208,12 +217,21 @@ async def run_rtds_crypto_stream(
             try:
                 message = await asyncio.wait_for(websocket.recv(), timeout=1)
             except TimeoutError:
+                if time.monotonic() - last_data > stale_after_seconds:
+                    await _write_control(
+                        writer,
+                        "rtds",
+                        "stale",
+                        connection_id,
+                        stale_after_seconds=stale_after_seconds,
+                    )
+                    raise TimeoutError("RTDS stream produced no price data")
                 continue
             except ConnectionClosed:
                 return
             if isinstance(message, bytes):
                 message = message.decode("utf-8", "replace")
-            if message == "PONG":
+            if message.upper() == "PONG":
                 continue
             await _write_json_message(
                 writer,
@@ -222,6 +240,7 @@ async def run_rtds_crypto_stream(
                 connection_id,
                 state,
             )
+            last_data = time.monotonic()
 
     await _run_reconnecting(
         source="rtds",
