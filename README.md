@@ -111,8 +111,8 @@ personnelle est :
 
 1. un dépôt GitHub public utilisant uniquement le runner standard
    `ubuntu-latest` ;
-2. une fenêtre de collecte de 5 h 38 qui met immédiatement son successeur en
-   attente avant de se terminer ;
+2. une fenêtre de collecte de 5 h 38 qui met son successeur en attente avant de
+   commencer à collecter ;
 3. un dataset Hugging Face public pour les archives. Les fichiers locaux sont
    supprimés uniquement après la réussite du commit distant.
 
@@ -122,13 +122,16 @@ dépôt le secret `HF_TOKEN`, limité en écriture au dataset indiqué par
 
 GitHub limite chaque tâche hébergée à six heures. Le script arrête donc le
 collecteur proprement avant cette limite, compresse la dernière tranche et
-l'envoie avant la destruction du runner. Après un cycle réussi, le workflow
-utilise son jeton GitHub temporaire pour déclencher un `workflow_dispatch`.
-Le groupe de concurrence garde ce successeur en attente au lieu de lancer deux
-collecteurs simultanés. Une planification horaire à la minute 47 sert uniquement
-de watchdog si un cycle échoue avant de pouvoir créer son successeur. Un
-heartbeat hebdomadaire maintient une activité légitime dans le dépôt, car GitHub
-désactive sinon les planifications des dépôts publics inactifs après 60 jours.
+l'envoie avant la destruction du runner. Dès le début de chaque cycle, le
+workflow utilise son jeton GitHub temporaire pour déclencher un
+`workflow_dispatch`. Le groupe de concurrence garde ce successeur en attente au
+lieu de lancer deux collecteurs simultanés. Les modifications du code ne
+déclenchent pas le collecteur et ne remplacent donc plus le successeur en
+attente. Une planification horaire à la minute 47 sert uniquement de watchdog ;
+elle peut remplacer le run en attente par un run plus récent sans toucher au
+collecteur actif. Un heartbeat hebdomadaire maintient une activité légitime
+dans le dépôt, car GitHub désactive sinon les planifications des dépôts publics
+inactifs après 60 jours.
 
 Les runners standards GitHub sont gratuits pour les dépôts publics. Ne pas
 choisir de « larger runner » et ne pas ajouter de moyen de paiement. Le service

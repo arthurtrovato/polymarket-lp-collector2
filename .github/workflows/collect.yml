@@ -1,11 +1,6 @@
 name: Collect Polymarket L2 data
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - "status/**"
   workflow_dispatch:
   schedule:
     # Hourly watchdog, away from the start of the hour. Successful runs also
@@ -14,6 +9,7 @@ on:
 
 concurrency:
   group: polymarket-l2-collector
+  queue: single
   cancel-in-progress: false
 
 permissions:
@@ -58,6 +54,18 @@ jobs:
             exit 1
           fi
 
+      # Keep one warm successor in GitHub's concurrency queue throughout the
+      # collection window. Scheduled watchdog runs may replace that pending run,
+      # but there is always a successor ready when this runner exits.
+      - name: Queue the next collection window
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run collect.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF_NAME"
+
       - name: Collect and back up data
         shell: bash
         run: bash scripts/run_github_collector.sh
@@ -83,16 +91,3 @@ jobs:
           git commit -m "chore: record weekly collector heartbeat"
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
-
-      # A scheduled run can be delayed or dropped by GitHub. Queue the next
-      # window explicitly while this runner is still alive. The concurrency
-      # group keeps it pending until the current collector has exited.
-      - name: Queue the next collection window
-        if: success()
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh workflow run collect.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref "$GITHUB_REF_NAME"
