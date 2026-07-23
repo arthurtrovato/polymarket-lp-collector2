@@ -1,15 +1,30 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import logging
 import os
 import time
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 from huggingface_hub import CommitOperationAdd, HfApi
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+@contextmanager
+def backup_lock(data_dir: Path) -> Iterator[None]:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = data_dir / ".hf-backup.lock"
+    with lock_path.open("a", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def completed_archives(
@@ -35,31 +50,32 @@ def upload_once(
     min_age_seconds: int,
     api: HfApi | None = None,
 ) -> int:
-    paths = completed_archives(
-        data_dir,
-        min_age_seconds=min_age_seconds,
-    )
-    if not paths:
-        return 0
-
-    client = api or HfApi(token=token)
-    operations = [
-        CommitOperationAdd(
-            path_in_repo=path.relative_to(data_dir).as_posix(),
-            path_or_fileobj=path,
+    with backup_lock(data_dir):
+        paths = completed_archives(
+            data_dir,
+            min_age_seconds=min_age_seconds,
         )
-        for path in paths
-    ]
-    client.create_commit(
-        repo_id=repo_id,
-        repo_type="dataset",
-        operations=operations,
-        commit_message=f"Add {len(paths)} Polymarket archive(s)",
-    )
-    for path in paths:
-        path.unlink()
-    LOGGER.info("Uploaded and removed %d local archive(s)", len(paths))
-    return len(paths)
+        if not paths:
+            return 0
+
+        client = api or HfApi(token=token)
+        operations = [
+            CommitOperationAdd(
+                path_in_repo=path.relative_to(data_dir).as_posix(),
+                path_or_fileobj=path,
+            )
+            for path in paths
+        ]
+        client.create_commit(
+            repo_id=repo_id,
+            repo_type="dataset",
+            operations=operations,
+            commit_message=f"Add {len(paths)} Polymarket archive(s)",
+        )
+        for path in paths:
+            path.unlink()
+        LOGGER.info("Uploaded and removed %d local archive(s)", len(paths))
+        return len(paths)
 
 
 def run_loop() -> None:
