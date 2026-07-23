@@ -72,11 +72,24 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(state.messages_total, 1)
             archive = next(Path(temporary).rglob("*.jsonl.gz"))
             with gzip.open(archive, "rt", encoding="utf-8") as handle:
-                record = json.loads(handle.readline())
+                records = [json.loads(line) for line in handle]
+            record = next(
+                item for item in records if item["record_type"] == "market_ws"
+            )
             self.assertEqual(record["payload"]["event_type"], "book")
             self.assertIn("received_at_ns", record)
+            self.assertIn("received_monotonic_ns", record)
+            self.assertEqual(record["frame_index"], 0)
+            self.assertEqual(record["frame_message_count"], 1)
+            self.assertEqual(record["subscription_revision"], 1)
+            controls = {
+                item.get("control_event")
+                for item in records
+                if item["record_type"] == "market_ws_control"
+            }
+            self.assertIn("connected", controls)
+            self.assertIn("disconnected", controls)
 
 
 if __name__ == "__main__":
     unittest.main()
-

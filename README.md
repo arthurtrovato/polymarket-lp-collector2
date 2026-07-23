@@ -16,7 +16,12 @@ backtests et modèles d'apprentissage automatique.
 - meilleurs bid/ask ;
 - dernières transactions ;
 - changements de tick et résolutions ;
-- métadonnées, volumes et paramètres de récompenses LP ;
+- univers LP utile : 500 marchés les mieux récompensés, totalité des marchés
+  sponsorisés, sélection suivie et paramètres de récompense ;
+- métadonnées CLOB/Gamma, frais, dates, catégories et sources de résolution ;
+- checkpoints REST des carnets toutes les cinq minutes pour réparer les trous ;
+- scores sportifs publics et prix de référence crypto Polymarket RTDS ;
+- connexions, déconnexions et changements d'abonnement explicitement horodatés ;
 - heure de réception locale en nanosecondes pour mesurer les délais.
 
 Les fichiers terminés sont écrits sous la forme :
@@ -25,6 +30,8 @@ Les fichiers terminés sont écrits sous la forme :
 data/
   market_ws/YYYY/MM/DD/market_ws-....jsonl.gz
   discovery/YYYY/MM/DD/discovery-....jsonl.gz
+  sports_ws/YYYY/MM/DD/sports_ws-....jsonl.gz
+  rtds/YYYY/MM/DD/rtds-....jsonl.gz
 ```
 
 Chaque ligne est un objet JSON autonome. Les fichiers `.part` sont récupérés et
@@ -141,6 +148,12 @@ dépendre de cette planification pour chaque transition réussie, mais le passag
 d'un runner au suivant peut encore créer une courte interruption de quelques
 secondes ou minutes.
 
+Chaque relais provoque nécessairement une courte coupure WebSocket. Les
+événements de contrôle permettent de la mesurer et les snapshots REST publics
+du carnet, enregistrés toutes les cinq minutes, réinitialisent ensuite l'état du
+carnet. Ils ne peuvent toutefois pas recréer les transactions ou changements
+intermédiaires qui n'ont jamais été reçus.
+
 Hugging Face affiche encore `CPU Basic` à 0 $ dans certaines documentations,
 mais l'API refuse désormais la création d'un Space Docker pour un compte gratuit
 sans abonnement PRO. `scripts/deploy_hf.py` n'est donc conservé que pour les
@@ -175,10 +188,12 @@ polymarket-etl data/ --output-dir analytics/normalized
 
 Cette commande produit :
 
-- `events.parquet` : événements WebSocket normalisés, avec une ligne par
-  changement de niveau ;
-- `book_levels.parquet` : niveaux des snapshots complets ;
-- `markets.parquet` : marchés récompensés et leurs deux tokens ;
+- `events.parquet` : événements WebSocket/REST, contrôles de connexion, sports
+  et références crypto normalisés, avec une ligne par changement de niveau ;
+- `book_levels.parquet` : niveaux des snapshots WebSocket et checkpoints REST ;
+- `markets.parquet` : sélection suivie, 500 marchés les mieux récompensés et
+  totalité des marchés sponsorisés, avec tokens, récompenses, métadonnées et
+  paramètres de frais ;
 - `quality-report.json` : lignes invalides, doublons exacts, champs manquants,
   régressions temporelles et répartition des événements.
 
@@ -239,7 +254,19 @@ testées avec `--rebate-capture-rate` et `--assumed-reward-share`. Le rapport
 
 ## Limites importantes
 
-- Avec 1 Go de RAM et 30 Go de disque, commencer avec 75 marchés maximum.
+- Le workflow suit les 40 meilleurs marchés récompensés en profondeur et
+  archive les 500 meilleurs ainsi que tous les marchés sponsorisés à chaque
+  découverte. Le snapshot contient un objet `coverage` qui rend cette frontière
+  explicite. Paginer tous les marchés natifs à très faible récompense prendrait
+  plus longtemps qu'un cycle et dupliquerait beaucoup de données sans valeur
+  pratique pour la sélection LP. Augmenter `MAX_MARKETS` accroît directement
+  le trafic et le stockage.
+- Les données publiques ne contiennent pas les ordres, exécutions, scores de
+  récompense ni position de file propres à un portefeuille. Il faudra ajouter
+  plus tard le canal utilisateur authentifié pour le paper/live trading.
+- Les données on-chain historiques (trades, positions et résolutions) peuvent
+  être jointes depuis les subgraphs Goldsky publics ; il est inutile de les
+  recopier à haute fréquence dans ce collecteur.
 - Une VM gratuite aux États-Unis convient à la collecte, pas au futur bot de
   trading sensible à la latence.
 - Le service conserve les messages bruts : les transformations en Parquet et

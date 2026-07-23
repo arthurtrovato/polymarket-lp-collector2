@@ -31,6 +31,11 @@ class MarketStream:
         self.state = state
         self._desired_assets: set[str] = set()
         self._assets_changed = asyncio.Event()
+        self._subscription_revision = 0
+
+    @property
+    def desired_assets(self) -> tuple[str, ...]:
+        return tuple(sorted(self._desired_assets))
 
     def set_assets(self, asset_ids: Iterable[str]) -> None:
         desired = {str(asset_id) for asset_id in asset_ids if asset_id}
@@ -52,6 +57,11 @@ class MarketStream:
             except Exception as exc:
                 self.state.last_error = f"websocket: {type(exc).__name__}: {exc}"
                 LOGGER.warning("WebSocket disconnected: %s", exc)
+                await self._record_control(
+                    "connection_error",
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
                 delay = min(delay * 2, 60)
 
             self.state.connected = False
@@ -96,6 +106,7 @@ class MarketStream:
                     separators=(",", ":"),
                 )
             )
+            self._subscription_revision += 1
             if subscribed == self._desired_assets:
                 self._assets_changed.clear()
             else:
@@ -103,13 +114,24 @@ class MarketStream:
             self.state.connected = True
             self.state.connected_at = time.time()
             self.state.last_error = None
+            await self._record_control(
+                "connected",
+                connection_id=connection_id,
+                subscribed_asset_ids=sorted(subscribed),
+                subscribed_asset_count=len(subscribed),
+            )
             LOGGER.info("WebSocket connected for %d assets", len(subscribed))
             last_ping = 0.0
+            close_details: dict[str, Any] = {}
 
             while not stop_event.is_set():
                 if self._assets_changed.is_set():
                     self._assets_changed.clear()
-                    subscribed = await self._sync_subscriptions(websocket, subscribed)
+                    subscribed = await self._sync_subscriptions(
+                        websocket,
+                        subscribed,
+                        connection_id,
+                    )
                     if subscribed != self._desired_assets:
                         self._assets_changed.set()
                     if not subscribed:
@@ -124,19 +146,42 @@ class MarketStream:
                     message = await asyncio.wait_for(websocket.recv(), timeout=1)
                 except TimeoutError:
                     continue
-                except ConnectionClosed:
+                except ConnectionClosed as exc:
+                    close_details = {
+                        "close_code": exc.code,
+                        "close_reason": exc.reason,
+                    }
                     break
 
                 if isinstance(message, bytes):
                     message = message.decode("utf-8", "replace")
                 if message == "PONG":
                     self.state.last_pong_at = time.time()
+                    await self._record_control(
+                        "pong",
+                        connection_id=connection_id,
+                        subscribed_asset_count=len(subscribed),
+                    )
                     continue
                 await self._record_message(message, connection_id)
 
+            await self._record_control(
+                "disconnected",
+                connection_id=connection_id,
+                connected_for_seconds=time.monotonic() - connected_monotonic,
+                stop_requested=stop_event.is_set(),
+                subscribed_asset_count=len(subscribed),
+                **close_details,
+            )
+
         return time.monotonic() - connected_monotonic
 
-    async def _sync_subscriptions(self, websocket: Any, subscribed: set[str]) -> set[str]:
+    async def _sync_subscriptions(
+        self,
+        websocket: Any,
+        subscribed: set[str],
+        connection_id: str,
+    ) -> set[str]:
         desired = set(self._desired_assets)
         removed = sorted(subscribed - desired)
         added = sorted(desired - subscribed)
@@ -159,6 +204,15 @@ class MarketStream:
                 )
             )
         if added or removed:
+            self._subscription_revision += 1
+            await self._record_control(
+                "subscription_update",
+                connection_id=connection_id,
+                added_asset_ids=added,
+                removed_asset_ids=removed,
+                subscribed_asset_ids=sorted(desired),
+                subscribed_asset_count=len(desired),
+            )
             LOGGER.info(
                 "WebSocket subscriptions updated: +%d -%d (%d total)",
                 len(added),
@@ -169,6 +223,7 @@ class MarketStream:
 
     async def _record_message(self, raw_message: str, connection_id: str) -> None:
         received_at_ns = time.time_ns()
+        received_monotonic_ns = time.monotonic_ns()
         try:
             payload = json.loads(raw_message)
         except json.JSONDecodeError:
@@ -177,24 +232,61 @@ class MarketStream:
                 {
                     "record_type": "invalid_market_ws",
                     "received_at_ns": received_at_ns,
+                    "received_monotonic_ns": received_monotonic_ns,
                     "connection_id": connection_id,
+                    "subscription_revision": self._subscription_revision,
                     "raw": raw_message,
                 }
             )
             return
 
         messages = payload if isinstance(payload, list) else [payload]
-        for item in messages:
+        for frame_index, item in enumerate(messages):
             if not isinstance(item, dict):
                 self.state.invalid_messages_total += 1
+                await self.writer.write(
+                    {
+                        "record_type": "invalid_market_ws_item",
+                        "received_at_ns": received_at_ns,
+                        "received_monotonic_ns": received_monotonic_ns,
+                        "connection_id": connection_id,
+                        "subscription_revision": self._subscription_revision,
+                        "frame_index": frame_index,
+                        "frame_message_count": len(messages),
+                        "raw_item": item,
+                    }
+                )
                 continue
             await self.writer.write(
                 {
                     "record_type": "market_ws",
                     "received_at_ns": received_at_ns,
+                    "received_monotonic_ns": received_monotonic_ns,
                     "connection_id": connection_id,
+                    "subscription_revision": self._subscription_revision,
+                    "frame_index": frame_index,
+                    "frame_message_count": len(messages),
                     "payload": item,
                 }
             )
             self.state.messages_total += 1
         self.state.last_message_at = time.time()
+
+    async def _record_control(
+        self,
+        control_event: str,
+        *,
+        connection_id: str = "",
+        **details: Any,
+    ) -> None:
+        await self.writer.write(
+            {
+                "record_type": "market_ws_control",
+                "control_event": control_event,
+                "received_at_ns": time.time_ns(),
+                "received_monotonic_ns": time.monotonic_ns(),
+                "connection_id": connection_id,
+                "subscription_revision": self._subscription_revision,
+                **details,
+            }
+        )

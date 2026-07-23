@@ -25,6 +25,9 @@ jobs:
       HF_DATASET_REPO: Houroux/polymarket-l2-history
       DATA_DIR: /tmp/polymarket-data
       MAX_MARKETS: "40"
+      BOOK_CHECKPOINT_INTERVAL_SECONDS: "300"
+      COLLECT_SPORTS: "true"
+      COLLECT_RTDS_CRYPTO: "true"
       ROTATION_SECONDS: "900"
       MAX_FILE_MIB: "64"
       BACKUP_INTERVAL_SECONDS: "900"
