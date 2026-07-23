@@ -408,6 +408,15 @@ class LPBacktester:
                 "inventory": self.inventory,
                 "equity": value,
                 "gross_pnl": value - initial_value,
+                "hold_equity": (
+                    self.config.initial_cash
+                    + self.config.initial_inventory * mid
+                ),
+                "lp_excess_pnl": value
+                - (
+                    self.config.initial_cash
+                    + self.config.initial_inventory * mid
+                ),
                 "active_bid": self.active_bid.price if self.active_bid else None,
                 "active_ask": self.active_ask.price if self.active_ask else None,
             }
@@ -501,7 +510,6 @@ class LPBacktester:
         if self.last_timestamp_ms is None or self.initial_mid is None:
             raise RuntimeError("No initialized order book was available")
         self._accrue_score(self.last_timestamp_ms)
-        self._resolve_markouts(self.last_timestamp_ms + self.config.markout_ms)
         self._record_equity(self.last_timestamp_ms, force=True)
         duration_ms = max(
             0,
@@ -513,6 +521,12 @@ class LPBacktester:
         )
         final_value = self.cash + self.inventory * final_mid
         gross_pnl = final_value - initial_value
+        buy_and_hold_value = (
+            self.config.initial_cash
+            + self.config.initial_inventory * final_mid
+        )
+        buy_and_hold_pnl = buy_and_hold_value - initial_value
+        lp_excess_pnl = final_value - buy_and_hold_value
         maker_rebate = self.fee_equivalent * self.config.rebate_capture_rate
         liquidity_reward = (
             self.config.reward_daily_pool
@@ -522,9 +536,16 @@ class LPBacktester:
         )
         peak = -math.inf
         max_drawdown = 0.0
+        excess_peak = -math.inf
+        max_excess_drawdown = 0.0
         for point in self.equity:
             peak = max(peak, point["equity"])
             max_drawdown = max(max_drawdown, peak - point["equity"])
+            excess_peak = max(excess_peak, point["lp_excess_pnl"])
+            max_excess_drawdown = max(
+                max_excess_drawdown,
+                excess_peak - point["lp_excess_pnl"],
+            )
         markouts = [
             fill.markout_pnl
             for fill in self.fills
@@ -540,7 +561,11 @@ class LPBacktester:
             "final_mid": final_mid,
             "initial_value": initial_value,
             "final_mark_to_market_value": final_value,
+            "final_buy_and_hold_value": buy_and_hold_value,
             "gross_trading_pnl": gross_pnl,
+            "gross_mark_to_market_pnl": gross_pnl,
+            "buy_and_hold_pnl": buy_and_hold_pnl,
+            "lp_excess_pnl_vs_hold": lp_excess_pnl,
             "maker_fee_paid": 0.0,
             "fee_equivalent_generated": self.fee_equivalent,
             "maker_rebate_estimate": maker_rebate,
@@ -548,12 +573,21 @@ class LPBacktester:
             "net_pnl_with_enabled_estimates": gross_pnl
             + maker_rebate
             + liquidity_reward,
+            "net_excess_pnl_vs_hold_with_enabled_estimates": lp_excess_pnl
+            + maker_rebate
+            + liquidity_reward,
             "final_cash": self.cash,
             "final_inventory": self.inventory,
             "fills": len(self.fills),
             "filled_shares": sum(fill.size for fill in self.fills),
             "max_drawdown": max_drawdown,
+            "max_excess_drawdown": max_excess_drawdown,
+            "resolved_markouts": len(markouts),
+            "unresolved_markouts": len(self.pending_markouts),
             "mean_60s_markout_pnl": (
+                sum(markouts) / len(markouts) if markouts else None
+            ),
+            "mean_markout_pnl": (
                 sum(markouts) / len(markouts) if markouts else None
             ),
             "single_token_liquidity_score_minutes": self.score_minutes,
@@ -597,6 +631,8 @@ def _equity_schema() -> Any:
             ("inventory", pa.float64()),
             ("equity", pa.float64()),
             ("gross_pnl", pa.float64()),
+            ("hold_equity", pa.float64()),
+            ("lp_excess_pnl", pa.float64()),
             ("active_bid", pa.float64()),
             ("active_ask", pa.float64()),
         ]

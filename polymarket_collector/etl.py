@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import math
+import sqlite3
 import time
 from collections import Counter
 from pathlib import Path
@@ -115,7 +116,7 @@ def _market_schema() -> Any:
 
 
 class Quality:
-    def __init__(self, inputs: list[Path]) -> None:
+    def __init__(self, inputs: list[Path], fingerprint_path: Path) -> None:
         self.started_at = time.time()
         self.inputs = inputs
         self.raw_rows = 0
@@ -130,18 +131,39 @@ class Quality:
         self.missing_required = Counter[str]()
         self.record_types = Counter[str]()
         self.event_types = Counter[str]()
-        self._fingerprints: set[bytes] = set()
         self._last_exchange_by_connection: dict[str, int] = {}
+        self._fingerprint_path = fingerprint_path
+        self._fingerprint_path.unlink(missing_ok=True)
+        self._fingerprints = sqlite3.connect(self._fingerprint_path)
+        self._fingerprints.execute("PRAGMA journal_mode=OFF")
+        self._fingerprints.execute("PRAGMA synchronous=OFF")
+        self._fingerprints.execute(
+            "CREATE TABLE fingerprints (digest BLOB PRIMARY KEY) WITHOUT ROWID"
+        )
+        self._fingerprints_since_commit = 0
 
     def observe_record(self, record: dict[str, Any]) -> None:
         record_type = str(record.get("record_type") or "<missing>")
         self.record_types[record_type] += 1
         encoded = canonical_json(record).encode("utf-8")
         fingerprint = hashlib.blake2b(encoded, digest_size=12).digest()
-        if fingerprint in self._fingerprints:
+        cursor = self._fingerprints.execute(
+            "INSERT OR IGNORE INTO fingerprints (digest) VALUES (?)",
+            (fingerprint,),
+        )
+        if cursor.rowcount == 0:
             self.duplicate_records += 1
-        else:
-            self._fingerprints.add(fingerprint)
+        self._fingerprints_since_commit += 1
+        if self._fingerprints_since_commit >= 100_000:
+            self._fingerprints.commit()
+            self._fingerprints_since_commit = 0
+
+    def close(self) -> None:
+        if self._fingerprints is not None:
+            self._fingerprints.commit()
+            self._fingerprints.close()
+            self._fingerprints = None
+        self._fingerprint_path.unlink(missing_ok=True)
 
     def observe_event(self, row: dict[str, Any]) -> None:
         self.normalized_events += 1
@@ -301,7 +323,7 @@ def convert(
     levels_path = output / "book_levels.parquet"
     markets_path = output / "markets.parquet"
     quality_path = output / "quality-report.json"
-    quality = Quality(paths)
+    quality = Quality(paths, output / ".quality-fingerprints.sqlite3.tmp")
     events = ParquetSink(events_path, _event_schema(), batch_size=batch_size)
     levels = ParquetSink(levels_path, _level_schema(), batch_size=batch_size)
     markets = ParquetSink(markets_path, _market_schema(), batch_size=batch_size)
@@ -472,7 +494,9 @@ def convert(
         events.abort()
         levels.abort()
         markets.abort()
+        quality.close()
         raise
+    quality.close()
     report = quality.report(outputs)
     quality_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n",

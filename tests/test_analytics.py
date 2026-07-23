@@ -144,6 +144,9 @@ class AnalyticsPipelineTests(unittest.TestCase):
             self.assertEqual(report["normalized_events"], 6)
             self.assertEqual(report["book_level_rows"], 2)
             self.assertEqual(report["market_token_rows"], 2)
+            self.assertFalse(
+                (normalized / ".quality-fingerprints.sqlite3.tmp").exists()
+            )
             events = pq.read_table(normalized / "events.parquet")
             self.assertEqual(events.num_rows, 6)
 
@@ -180,7 +183,14 @@ class AnalyticsPipelineTests(unittest.TestCase):
             )
             self.assertEqual(summary["fills"], 2)
             self.assertAlmostEqual(summary["gross_trading_pnl"], 0.10, places=8)
+            self.assertAlmostEqual(
+                summary["lp_excess_pnl_vs_hold"],
+                0.10,
+                places=8,
+            )
             self.assertEqual(summary["maker_fee_paid"], 0)
+            self.assertEqual(summary["resolved_markouts"], 1)
+            self.assertEqual(summary["unresolved_markouts"], 1)
             self.assertTrue((root / "backtest" / "fills.parquet").exists())
             self.assertTrue((root / "backtest" / "summary.json").exists())
 

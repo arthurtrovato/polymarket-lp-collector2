@@ -179,8 +179,9 @@ Cette commande produit :
 - `quality-report.json` : lignes invalides, doublons exacts, champs manquants,
   régressions temporelles et répartition des événements.
 
-Le traitement est effectué par lots et ne charge pas toutes les archives en
-mémoire.
+Le traitement est effectué par lots. Les empreintes utilisées pour détecter les
+doublons exacts sont conservées dans une base SQLite temporaire sur disque :
+l'historique complet n'est donc pas chargé en mémoire.
 
 ### 2. Reconstruction des carnets
 
@@ -218,8 +219,14 @@ snapshot est choisi. Le simulateur applique :
 - capital, inventaire minimum/maximum et exécutions partielles ;
 - file d'attente conservatrice égale par défaut à toute la taille déjà présente
   au niveau ;
-- markout à 60 secondes, drawdown et valorisation au midpoint ;
+- markout à 60 secondes, drawdown et valorisation au midpoint ; un markout
+  reste non résolu si l'historique se termine avant son échéance ;
 - frais maker nuls et calcul du fee-equivalent des transactions.
+
+Le rapport distingue le PnL mark-to-market total du PnL excédentaire par rapport
+au scénario où l'inventaire initial aurait simplement été conservé. C'est ce
+dernier (`lp_excess_pnl_vs_hold`) qu'il faut privilégier pour juger la stratégie
+de fourniture de liquidité.
 
 Les maker rebates et récompenses LP restent à zéro par défaut : les données
 publiques ne révèlent ni la position exacte de notre ordre dans la file, ni les
