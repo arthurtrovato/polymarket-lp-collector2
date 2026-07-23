@@ -42,6 +42,18 @@ def _float(name: str, default: float, minimum: float = 0) -> float:
     return value
 
 
+def _bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean, got {raw!r}")
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     data_dir: Path
@@ -56,8 +68,14 @@ class Config:
     health_port: int
     stale_after_seconds: int
     log_level: str
+    book_checkpoint_interval_seconds: int
+    collect_sports: bool
+    collect_rtds_crypto: bool
     clob_base_url: str = "https://clob.polymarket.com"
+    gamma_base_url: str = "https://gamma-api.polymarket.com"
     websocket_url: str = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+    sports_websocket_url: str = "wss://sports-api.polymarket.com/ws"
+    rtds_websocket_url: str = "wss://ws-live-data.polymarket.com"
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -82,11 +100,27 @@ class Config:
             ),
             stale_after_seconds=_int("STALE_AFTER_SECONDS", 180, 30),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+            book_checkpoint_interval_seconds=_int(
+                "BOOK_CHECKPOINT_INTERVAL_SECONDS", 300, 0
+            ),
+            collect_sports=_bool("COLLECT_SPORTS", True),
+            collect_rtds_crypto=_bool("COLLECT_RTDS_CRYPTO", True),
             clob_base_url=os.getenv(
                 "CLOB_BASE_URL", "https://clob.polymarket.com"
+            ).rstrip("/"),
+            gamma_base_url=os.getenv(
+                "GAMMA_BASE_URL", "https://gamma-api.polymarket.com"
             ).rstrip("/"),
             websocket_url=os.getenv(
                 "WEBSOCKET_URL",
                 "wss://ws-subscriptions-clob.polymarket.com/ws/market",
+            ),
+            sports_websocket_url=os.getenv(
+                "SPORTS_WEBSOCKET_URL",
+                "wss://sports-api.polymarket.com/ws",
+            ),
+            rtds_websocket_url=os.getenv(
+                "RTDS_WEBSOCKET_URL",
+                "wss://ws-live-data.polymarket.com",
             ),
         )
