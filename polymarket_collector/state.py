@@ -27,6 +27,13 @@ class CollectorState:
     invalid_messages_total: int = 0
     reconnects_total: int = 0
     discovery_failures_total: int = 0
+    universe_failures_total: int = 0
+    book_checkpoints_total: int = 0
+    book_checkpoint_failures_total: int = 0
+    last_book_checkpoint_at: float | None = None
+    sports_messages_total: int = 0
+    rtds_messages_total: int = 0
+    auxiliary_reconnects_total: int = 0
     last_error: str | None = None
 
     def health(self, stale_after_seconds: int) -> tuple[bool, str]:
@@ -61,6 +68,12 @@ class CollectorState:
             "invalid_messages_total": self.invalid_messages_total,
             "reconnects_total": self.reconnects_total,
             "discovery_failures_total": self.discovery_failures_total,
+            "universe_failures_total": self.universe_failures_total,
+            "book_checkpoints_total": self.book_checkpoints_total,
+            "book_checkpoint_failures_total": self.book_checkpoint_failures_total,
+            "last_book_checkpoint_at": _iso(self.last_book_checkpoint_at),
+            "sports_messages_total": self.sports_messages_total,
+            "rtds_messages_total": self.rtds_messages_total,
+            "auxiliary_reconnects_total": self.auxiliary_reconnects_total,
             "last_error": self.last_error,
         }
-
