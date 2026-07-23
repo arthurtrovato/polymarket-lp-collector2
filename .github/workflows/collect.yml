@@ -8,14 +8,16 @@ on:
       - "status/**"
   workflow_dispatch:
   schedule:
-    # Away from the start of the hour, when scheduled Actions are busiest.
-    - cron: "23 */5 * * *"
+    # Hourly watchdog, away from the start of the hour. Successful runs also
+    # dispatch their own successor, so this schedule is only a recovery path.
+    - cron: "47 * * * *"
 
 concurrency:
   group: polymarket-l2-collector
   cancel-in-progress: false
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
@@ -81,3 +83,16 @@ jobs:
           git commit -m "chore: record weekly collector heartbeat"
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      # A scheduled run can be delayed or dropped by GitHub. Queue the next
+      # window explicitly while this runner is still alive. The concurrency
+      # group keeps it pending until the current collector has exited.
+      - name: Queue the next collection window
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run collect.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF_NAME"

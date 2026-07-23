@@ -111,7 +111,8 @@ personnelle est :
 
 1. un dépôt GitHub public utilisant uniquement le runner standard
    `ubuntu-latest` ;
-2. une fenêtre de collecte de 5 h 38, relancée toutes les 5 heures ;
+2. une fenêtre de collecte de 5 h 38 qui met immédiatement son successeur en
+   attente avant de se terminer ;
 3. un dataset Hugging Face public pour les archives. Les fichiers locaux sont
    supprimés uniquement après la réussite du commit distant.
 
@@ -121,16 +122,21 @@ dépôt le secret `HF_TOKEN`, limité en écriture au dataset indiqué par
 
 GitHub limite chaque tâche hébergée à six heures. Le script arrête donc le
 collecteur proprement avant cette limite, compresse la dernière tranche et
-l'envoie avant la destruction du runner. Le groupe de concurrence garde la
-prochaine exécution en attente au lieu de lancer deux collecteurs simultanés.
-Un heartbeat hebdomadaire maintient une activité légitime dans le dépôt, car
-GitHub désactive sinon les planifications des dépôts publics inactifs après
-60 jours.
+l'envoie avant la destruction du runner. Après un cycle réussi, le workflow
+utilise son jeton GitHub temporaire pour déclencher un `workflow_dispatch`.
+Le groupe de concurrence garde ce successeur en attente au lieu de lancer deux
+collecteurs simultanés. Une planification horaire à la minute 47 sert uniquement
+de watchdog si un cycle échoue avant de pouvoir créer son successeur. Un
+heartbeat hebdomadaire maintient une activité légitime dans le dépôt, car GitHub
+désactive sinon les planifications des dépôts publics inactifs après 60 jours.
 
 Les runners standards GitHub sont gratuits pour les dépôts publics. Ne pas
 choisir de « larger runner » et ne pas ajouter de moyen de paiement. Le service
 reste du best effort : une exécution planifiée peut exceptionnellement être
-retardée ou abandonnée par GitHub.
+retardée ou abandonnée par GitHub. La chaîne par `workflow_dispatch` évite de
+dépendre de cette planification pour chaque transition réussie, mais le passage
+d'un runner au suivant peut encore créer une courte interruption de quelques
+secondes ou minutes.
 
 Hugging Face affiche encore `CPU Basic` à 0 $ dans certaines documentations,
 mais l'API refuse désormais la création d'un Space Docker pour un compte gratuit
