@@ -155,6 +155,78 @@ python -m unittest discover -s tests -v
 
 Les tests ne contactent pas Polymarket et ne nécessitent aucune clé.
 
+## Pipeline analytique : Parquet, carnets et backtests
+
+Les dépendances analytiques sont optionnelles afin de ne pas ralentir le
+collecteur GitHub :
+
+```bash
+python -m pip install -e '.[analytics]'
+```
+
+### 1. Conversion et contrôle qualité
+
+```bash
+polymarket-etl data/ --output-dir analytics/normalized
+```
+
+Cette commande produit :
+
+- `events.parquet` : événements WebSocket normalisés, avec une ligne par
+  changement de niveau ;
+- `book_levels.parquet` : niveaux des snapshots complets ;
+- `markets.parquet` : marchés récompensés et leurs deux tokens ;
+- `quality-report.json` : lignes invalides, doublons exacts, champs manquants,
+  régressions temporelles et répartition des événements.
+
+Le traitement est effectué par lots et ne charge pas toutes les archives en
+mémoire.
+
+### 2. Reconstruction des carnets
+
+```bash
+polymarket-reconstruct \
+  --events analytics/normalized/events.parquet \
+  --book-levels analytics/normalized/book_levels.parquet \
+  --output analytics/books.parquet
+```
+
+Un événement `book` remplace entièrement l'état d'un token. Chaque
+`price_change` remplace ensuite la taille agrégée du niveau correspondant ; une
+taille nulle supprime le niveau. Le fichier de qualité associé signale notamment
+les mises à jour reçues avant un snapshot, les carnets croisés, les écarts de
+temps et les incohérences de meilleur bid/ask. Les notifications
+`best_bid_ask`, qui ne contiennent aucune taille, sont utilisées pour supprimer
+les niveaux devenus impossibles mais ne déclenchent un snapshot qu'après le
+`price_change` porteur de profondeur qui les accompagne.
+
+### 3. Backtest LP conservateur
+
+```bash
+polymarket-backtest \
+  --events analytics/normalized/events.parquet \
+  --book-levels analytics/normalized/book_levels.parquet \
+  --markets analytics/normalized/markets.parquet \
+  --output-dir analytics/backtest
+```
+
+Sans `--asset-id`, le token ayant le plus de transactions et au moins un
+snapshot est choisi. Le simulateur applique :
+
+- ordres post-only et délai d'activation ;
+- renouvellement périodique des quotes et skew d'inventaire ;
+- capital, inventaire minimum/maximum et exécutions partielles ;
+- file d'attente conservatrice égale par défaut à toute la taille déjà présente
+  au niveau ;
+- markout à 60 secondes, drawdown et valorisation au midpoint ;
+- frais maker nuls et calcul du fee-equivalent des transactions.
+
+Les maker rebates et récompenses LP restent à zéro par défaut : les données
+publiques ne révèlent ni la position exacte de notre ordre dans la file, ni les
+scores individuels de tous les makers. Des hypothèses explicites peuvent être
+testées avec `--rebate-capture-rate` et `--assumed-reward-share`. Le rapport
+`summary.json` conserve ces hypothèses et les limites du résultat.
+
 ## Limites importantes
 
 - Avec 1 Go de RAM et 30 Go de disque, commencer avec 75 marchés maximum.

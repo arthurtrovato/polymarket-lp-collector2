@@ -13,8 +13,16 @@ dependencies = [
   "websockets>=15,<17",
 ]
 
+[project.optional-dependencies]
+analytics = [
+  "pyarrow>=18,<24",
+]
+
 [project.scripts]
 polymarket-collector = "polymarket_collector.main:cli"
+polymarket-etl = "polymarket_collector.etl:cli"
+polymarket-reconstruct = "polymarket_collector.orderbook:cli"
+polymarket-backtest = "polymarket_collector.backtest:cli"
 
 [tool.setuptools.packages.find]
 include = ["polymarket_collector*"]
