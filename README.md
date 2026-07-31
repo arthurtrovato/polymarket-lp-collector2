@@ -223,7 +223,7 @@ les exécutions concurrentes.
 Le workflow `.github/workflows/etl.yml` exécute cette commande chaque heure sur
 les nouveaux fichiers du dataset Hugging Face et publie les partitions sous
 `analytics/`. Il utilise le même secret `HF_TOKEN` que le collecteur, traite au
-plus 24 archives par passage (`MAX_INPUT_FILES`) et ne téléverse jamais le
+plus 48 archives par passage (`MAX_INPUT_FILES`) et ne téléverse jamais le
 verrou ou les fichiers temporaires.
 
 ### 2. Reconstruction des carnets
