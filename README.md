@@ -195,7 +195,8 @@ Cette commande produit :
   totalité des marchés sponsorisés, avec tokens, récompenses, métadonnées et
   paramètres de frais ;
 - `quality-report.json` : lignes invalides, doublons exacts, champs manquants,
-  régressions temporelles et répartition des événements.
+  régressions temporelles par connexion et instrument (marché ou symbole), et
+  répartition des événements.
 
 Le traitement est effectué par lots. Les empreintes utilisées pour détecter les
 doublons exacts sont conservées dans une base SQLite temporaire sur disque :

@@ -297,6 +297,54 @@ class AnalyticsPipelineTests(unittest.TestCase):
             self.assertFalse(market["is_selected"])
             self.assertEqual(market["daily_reward"], 12.5)
 
+    def test_timestamp_regressions_are_scoped_to_instrument(self) -> None:
+        records = [
+            ws(
+                2_000_000_000,
+                {
+                    "event_type": "book",
+                    "timestamp": "2000",
+                    "market": "market-1",
+                    "asset_id": "asset-1",
+                    "bids": [],
+                    "asks": [],
+                },
+            ),
+            ws(
+                2_500_000_000,
+                {
+                    "event_type": "book",
+                    "timestamp": "1000",
+                    "market": "market-2",
+                    "asset_id": "asset-2",
+                    "bids": [],
+                    "asks": [],
+                },
+            ),
+            ws(
+                3_000_000_000,
+                {
+                    "event_type": "book",
+                    "timestamp": "1500",
+                    "market": "market-1",
+                    "asset_id": "asset-1",
+                    "bids": [],
+                    "asks": [],
+                },
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "timestamps.jsonl.gz"
+            with gzip.open(source, "wt", encoding="utf-8") as target:
+                for record in records:
+                    target.write(json.dumps(record) + "\n")
+
+            report = convert([source], root / "normalized")
+            # The market-2 message is interleaved but not out of order for
+            # market-1. Only the later market-1 timestamp is a regression.
+            self.assertEqual(report["timestamp_regressions"], 1)
+
     def test_reward_scoring_is_bounded_and_rewards_two_sided_quotes(self) -> None:
         self.assertAlmostEqual(
             reward_order_score(

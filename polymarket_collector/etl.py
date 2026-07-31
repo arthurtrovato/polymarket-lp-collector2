@@ -211,7 +211,11 @@ class Quality:
         self.missing_required = Counter[str]()
         self.record_types = Counter[str]()
         self.event_types = Counter[str]()
-        self._last_exchange_by_connection: dict[str, int] = {}
+        # Exchange clocks are only comparable within one subscribed instrument.
+        # A WebSocket connection multiplexes many markets/symbols, so comparing
+        # their timestamps against one connection-wide maximum creates false
+        # regressions whenever messages interleave.
+        self._last_exchange_by_stream: dict[tuple[str, str], int] = {}
         self._fingerprint_path = fingerprint_path
         self._fingerprint_path.unlink(missing_ok=True)
         self._fingerprints = sqlite3.connect(self._fingerprint_path)
@@ -248,13 +252,17 @@ class Quality:
     def observe_event(self, row: dict[str, Any]) -> None:
         self.normalized_events += 1
         self.event_types[str(row.get("event_type") or "<missing>")] += 1
-        connection = row.get("connection_id")
+        connection = str(row.get("connection_id") or "")
         timestamp = row.get("exchange_timestamp_ms")
-        if connection and timestamp is not None:
-            previous = self._last_exchange_by_connection.get(connection)
+        instrument = str(
+            row.get("market") or row.get("symbol") or row.get("asset_id") or ""
+        )
+        if connection and instrument and timestamp is not None:
+            stream = (connection, instrument)
+            previous = self._last_exchange_by_stream.get(stream)
             if previous is not None and timestamp < previous:
                 self.timestamp_regressions += 1
-            self._last_exchange_by_connection[connection] = max(
+            self._last_exchange_by_stream[stream] = max(
                 timestamp,
                 previous if previous is not None else timestamp,
             )
