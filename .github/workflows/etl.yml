@@ -4,6 +4,8 @@ on:
   # Run once when this workflow is installed or its configuration changes,
   # so the first backfill does not have to wait for the hourly cron.
   push:
+    branches:
+      - main
     paths:
       - ".github/workflows/etl.yml"
   workflow_dispatch:
