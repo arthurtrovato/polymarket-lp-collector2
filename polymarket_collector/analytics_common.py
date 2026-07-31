@@ -127,8 +127,35 @@ def iter_parquet_rows(
     batch_size: int = 65_536,
 ) -> Iterator[dict[str, Any]]:
     _, pq = require_pyarrow()
-    parquet = pq.ParquetFile(Path(path))
-    for batch in parquet.iter_batches(batch_size=batch_size, columns=columns):
-        for row in batch.to_pylist():
-            yield row
+    input_path = Path(path)
+    parquet_paths = list(input_path.rglob("*.parquet")) if input_path.is_dir() else [input_path]
+    if not parquet_paths:
+        raise FileNotFoundError(f"No Parquet files found at {input_path}")
 
+    def sequence_sort_key(parquet_path: Path) -> tuple[int, int, str]:
+        """Keep partitioned event/level datasets in global sequence order."""
+
+        try:
+            parquet = pq.ParquetFile(parquet_path)
+            names = parquet.schema_arrow.names
+            if "sequence" in names:
+                index = names.index("sequence")
+                minima: list[int] = []
+                for row_group in range(parquet.metadata.num_row_groups):
+                    statistics = parquet.metadata.row_group(row_group).column(index).statistics
+                    if statistics is not None and statistics.has_min_max:
+                        minima.append(int(statistics.min))
+                if minima:
+                    return (0, min(minima), parquet_path.as_posix())
+        except (OSError, ValueError, TypeError):
+            # A non-sequenced Parquet directory still remains usable; it falls
+            # back to deterministic path ordering below.
+            pass
+        return (1, 0, parquet_path.as_posix())
+
+    parquet_paths.sort(key=sequence_sort_key)
+    for parquet_path in parquet_paths:
+        parquet = pq.ParquetFile(parquet_path)
+        for batch in parquet.iter_batches(batch_size=batch_size, columns=columns):
+            for row in batch.to_pylist():
+                yield row

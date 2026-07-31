@@ -201,6 +201,31 @@ Le traitement est effectué par lots. Les empreintes utilisées pour détecter l
 doublons exacts sont conservées dans une base SQLite temporaire sur disque :
 l'historique complet n'est donc pas chargé en mémoire.
 
+### 1 bis. ETL incrémental et manifeste
+
+Pour traiter une collection qui continue de grossir sans réécrire l'historique
+à chaque fenêtre :
+
+```bash
+polymarket-etl-incremental data/ \
+  --input-root data \
+  --output-dir analytics/incremental
+```
+
+Le résultat est partitionné par jour et par archive dans `events/`,
+`book_levels/` et `markets/`. Le fichier `manifest.json` conserve, pour chaque
+archive, sa taille, son SHA-256, les séquences globales, le rapport qualité et
+les fichiers Parquet produits. Une archive déjà validée est ignorée ; si son
+contenu change, le traitement s'arrête au lieu de remplacer silencieusement
+les données. L'écriture du manifeste est atomique et un verrou local protège
+les exécutions concurrentes.
+
+Le workflow `.github/workflows/etl.yml` exécute cette commande chaque heure sur
+les nouveaux fichiers du dataset Hugging Face et publie les partitions sous
+`analytics/`. Il utilise le même secret `HF_TOKEN` que le collecteur, traite au
+plus 24 archives par passage (`MAX_INPUT_FILES`) et ne téléverse jamais le
+verrou ou les fichiers temporaires.
+
 ### 2. Reconstruction des carnets
 
 ```bash
