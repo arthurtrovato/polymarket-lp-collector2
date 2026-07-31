@@ -1,0 +1,41 @@
+name: Build incremental analytics
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Keep this away from the collector's :47 watchdog and its handoff.
+    - cron: "17 * * * *"
+
+concurrency:
+  group: polymarket-l2-incremental-etl
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_DATASET_REPO: Houroux/polymarket-l2-history
+      MAX_INPUT_FILES: "24"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install analytics dependencies
+        run: python -m pip install -e '.[analytics]'
+
+      - name: Check Hugging Face secret
+        run: test -n "$HF_TOKEN"
+
+      - name: Convert new archives and publish partitions
+        run: python scripts/run_incremental_etl.py

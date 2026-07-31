@@ -644,7 +644,10 @@ def convert(
     output_dir: str | Path,
     *,
     batch_size: int = 50_000,
+    sequence_start: int = 0,
 ) -> dict[str, Any]:
+    if sequence_start < 0:
+        raise ValueError("sequence_start must be non-negative")
     paths = resolve_jsonl_inputs(inputs)
     if not paths:
         raise ValueError("No input files")
@@ -658,7 +661,7 @@ def convert(
     events = ParquetSink(events_path, _event_schema(), batch_size=batch_size)
     levels = ParquetSink(levels_path, _level_schema(), batch_size=batch_size)
     markets = ParquetSink(markets_path, _market_schema(), batch_size=batch_size)
-    sequence = 0
+    sequence = sequence_start
     try:
         for path in paths:
             LOGGER.info("Converting %s", path)
@@ -860,6 +863,8 @@ def convert(
         raise
     quality.close()
     report = quality.report(outputs)
+    report["sequence_start"] = sequence_start
+    report["sequence_end"] = sequence
     quality_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -874,6 +879,7 @@ def cli() -> None:
     parser.add_argument("inputs", nargs="+", help="JSONL files or directories")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--batch-size", type=int, default=50_000)
+    parser.add_argument("--sequence-start", type=int, default=0)
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO,
@@ -883,6 +889,7 @@ def cli() -> None:
         args.inputs,
         args.output_dir,
         batch_size=args.batch_size,
+        sequence_start=args.sequence_start,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
