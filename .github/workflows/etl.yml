@@ -27,7 +27,7 @@ jobs:
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       HF_DATASET_REPO: Houroux/polymarket-l2-history
-      MAX_INPUT_FILES: "48"
+      MAX_INPUT_FILES: "144"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
